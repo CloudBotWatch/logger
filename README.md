@@ -40,6 +40,60 @@ npx wrangler secret put LOG_ENDPOINT
 
 ---
 
+## Routing your domain through the Worker
+
+The Worker is a transparent proxy — it passes every request to your origin unchanged and logs the metadata asynchronously. Your site's behaviour and response times are not affected.
+
+**Requirements:** your domain must be proxied through Cloudflare (orange cloud DNS record). The Worker cannot intercept traffic on DNS-only (grey cloud) records.
+
+### Option A — Deploy to Cloudflare button (recommended)
+
+Click the button at the top of this page. It forks the repo to your account, creates the Worker, and prompts you to add a route — all in one flow.
+
+### Option B — Wrangler CLI
+
+Add a `routes` block to `wrangler.toml` before deploying:
+
+```toml
+routes = [
+  { pattern = "example.com/*", zone_name = "example.com" }
+]
+```
+
+Replace `example.com` with your domain. Use `*example.com/*` to also cover subdomains. Then deploy:
+
+```bash
+npx wrangler deploy
+```
+
+### Option C — Cloudflare dashboard
+
+1. Deploy the Worker first (`npx wrangler deploy`)
+2. Go to **Workers & Pages → your worker → Settings → Triggers**
+3. Under **Routes**, click **Add route**
+4. Enter `example.com/*` and select your zone
+5. Save
+
+### Subdomain handling
+
+Register your site using the zone apex (`example.com`) and use a wildcard route to cover all subdomains in one deployment:
+
+```toml
+routes = [
+  { pattern = "*example.com/*", zone_name = "example.com" }
+]
+```
+
+Every event includes the full `hostname` (`www.example.com`, `blog.example.com`, etc.), so you can filter by subdomain in the CloudBotWatch dashboard without needing separate Workers or separate site registrations.
+
+### Verifying the route is active
+
+After adding a route, every page request to your domain will trigger the Worker. Confirm in the Cloudflare dashboard under **Workers & Pages → your worker → Metrics** — you should see invocations appear within minutes of normal traffic.
+
+If you are using CloudBotWatch, the dashboard shows a verify-connection indicator that confirms the first event has been received.
+
+---
+
 ## Configuration
 
 All settings are Cloudflare Worker environment variables. The `[vars]` block in `wrangler.toml` sets the defaults; override them in the Cloudflare dashboard under **Workers & Pages → your worker → Settings → Variables**.
