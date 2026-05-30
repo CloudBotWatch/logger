@@ -1,3 +1,5 @@
+<img src="logo.svg" alt="CloudBotWatch" height="100">
+
 # CloudBotWatch Logger
 
 A universal Cloudflare edge telemetry collector. Point it at any HTTP endpoint — works out of the box with [CloudBotWatch.com](https://cloudbotwatch.com), or bring your own backend.
