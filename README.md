@@ -39,14 +39,6 @@ npx wrangler secret put LOG_ENDPOINT
 npx wrangler secret put LOG_SECRET
 ```
 
-Add a route to `wrangler.toml` before deploying:
-
-```toml
-routes = [
-  { pattern = "*example.com/*", zone_name = "example.com" }
-]
-```
-
 ---
 
 ## Routing your domain through the Worker
