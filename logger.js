@@ -33,7 +33,13 @@ async function signRequest(secret, timestamp, body) {
   return Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-function buildPayload(request, cf) {
+function raySuffixFromResponse(response) {
+  const ray = response.headers.get('CF-Ray') || '';
+  const id = (ray.split('-')[0] || '').trim();
+  return id.length >= 4 ? id.slice(-4) : (id || null);
+}
+
+function buildPayload(request, cf, response) {
   const url = new URL(request.url);
   const asn = cf.asn ? Number(cf.asn) : null;
   const asnOrg = cf.asOrganization || null;
@@ -43,12 +49,12 @@ function buildPayload(request, cf) {
   return {
     hostname: url.hostname,
     path: url.pathname,
-    ray_suffix: (cf.rayId || '').slice(-4),
+    ray_suffix: raySuffixFromResponse(response),
     ip_range: maskIp(ip, asnClass),
     country: cf.country || null,
     asn: asn,
     asn_organization: asnOrg,
-    cache_status: cf.cacheStatus || null,
+    cache_status: response.headers.get('CF-Cache-Status') || null,
     referer: request.headers.get('referer') || null,
     user_agent: request.headers.get('user-agent') || null,
     method: request.method,
@@ -90,7 +96,7 @@ export default {
       return response;
     }
 
-    const payload = buildPayload(request, cf);
+    const payload = buildPayload(request, cf, response);
     payload.status = response.status;
 
     ctx.waitUntil((async () => {
