@@ -3,5 +3,5 @@ main = "logger.js"
 compatibility_date = "2025-05-30"
 
 [vars]
-LOG_HTML_ONLY = "true"
+LOG_HTML_ONLY = "false"
 LOG_SAMPLE_RATE = "1"

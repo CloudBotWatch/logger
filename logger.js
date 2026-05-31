@@ -63,7 +63,7 @@ function buildPayload(request, cf, response) {
 }
 
 function shouldLog(request, env, asnClass) {
-  const htmlOnly = (env.LOG_HTML_ONLY || 'true') === 'true';
+  const htmlOnly = (env.LOG_HTML_ONLY || 'false') === 'true';
   const sampleRate = parseFloat(env.LOG_SAMPLE_RATE || '1');
 
   if (htmlOnly) {

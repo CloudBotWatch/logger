@@ -4,10 +4,6 @@
 
 A universal Cloudflare edge telemetry collector. Point it at any HTTP endpoint — works out of the box with [CloudBotWatch.com](https://cloudbotwatch.com), or bring your own backend.
 
-[![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/CloudBotWatch/logger)
-
----
-
 ## What it does
 
 The Worker intercepts every request passing through your Cloudflare zone, assembles a privacy-minimised telemetry record from Cloudflare edge metadata, and forwards it to your configured endpoint — all inside `ctx.waitUntil`, so your visitors are never affected.
@@ -16,28 +12,39 @@ Every outbound request is signed with HMAC-SHA256 (`X-Timestamp` + `X-Signature`
 
 ---
 
-## Quick start (Wrangler CLI)
+## Quick start
+
+No GitHub account or local tooling required — deploy directly from the Cloudflare dashboard.
+
+### Option A — Cloudflare dashboard (recommended)
+
+1. Copy the contents of [`logger.js`](https://raw.githubusercontent.com/CloudBotWatch/logger/main/logger.js)
+2. Go to [dash.cloudflare.com](https://dash.cloudflare.com) → **Workers & Pages → Create**
+3. Choose **Create Worker**, paste the code, and click **Deploy**
+4. Go to **Settings → Variables** and add `LOG_ENDPOINT` and `LOG_SECRET` as encrypted secrets
+5. Go to **Settings → Triggers → Routes**, click **Add route**, and enter `*example.com/*`
+
+### Option B — Wrangler CLI
 
 ```bash
 git clone https://github.com/CloudBotWatch/logger.git
-cd logger
-npm install
-cp .env.example .env
-# Edit .env — set LOG_ENDPOINT and LOG_SECRET
-npx wrangler dev
-```
-
-To deploy:
-
-```bash
+cd logger && npm install
 npx wrangler deploy
 ```
 
-Set secrets in production (never commit them):
+Then set the required secrets (the Worker will not send any data until both are set):
 
 ```bash
-npx wrangler secret put LOG_SECRET
 npx wrangler secret put LOG_ENDPOINT
+npx wrangler secret put LOG_SECRET
+```
+
+Add a route to `wrangler.toml` before deploying:
+
+```toml
+routes = [
+  { pattern = "*example.com/*", zone_name = "example.com" }
+]
 ```
 
 ---
@@ -47,34 +54,6 @@ npx wrangler secret put LOG_ENDPOINT
 The Worker is a transparent proxy — it passes every request to your origin unchanged and logs the metadata asynchronously. Your site's behaviour and response times are not affected.
 
 **Requirements:** your domain must be proxied through Cloudflare (orange cloud DNS record). The Worker cannot intercept traffic on DNS-only (grey cloud) records.
-
-### Option A — Deploy to Cloudflare button (recommended)
-
-Click the button at the top of this page. It forks the repo to your account, creates the Worker, and prompts you to add a route — all in one flow.
-
-### Option B — Wrangler CLI
-
-Add a `routes` block to `wrangler.toml` before deploying:
-
-```toml
-routes = [
-  { pattern = "example.com/*", zone_name = "example.com" }
-]
-```
-
-Replace `example.com` with your domain. Use `*example.com/*` to also cover subdomains. Then deploy:
-
-```bash
-npx wrangler deploy
-```
-
-### Option C — Cloudflare dashboard
-
-1. Deploy the Worker first (`npx wrangler deploy`)
-2. Go to **Workers & Pages → your worker → Settings → Triggers**
-3. Under **Routes**, click **Add route**
-4. Enter `example.com/*` and select your zone
-5. Save
 
 ### Subdomain handling
 
@@ -104,8 +83,8 @@ All settings are Cloudflare Worker environment variables. The `[vars]` block in 
 |---|---|---|
 | `LOG_ENDPOINT` | *(required)* | URL to POST telemetry to — CloudBotWatch ingest URL, ELK, Datadog, or any HTTP endpoint |
 | `LOG_SECRET` | *(required)* | HMAC-SHA256 signing secret shared with your backend. Minimum 32 characters. |
-| `LOG_HTML_ONLY` | `true` | When `true`, only log requests where the `Accept` header includes `text/html` — skips assets, XHR, and API calls. Best signal-to-noise ratio for bot detection. |
-| `LOG_SAMPLE_RATE` | `1` | Fraction of requests to log (`0.0`–`1.0`). Set to `0.1` to log 10% of traffic. Useful for very high-traffic sites. |
+| `LOG_HTML_ONLY` | `false` | When `true`, only log requests where the `Accept` header includes `text/html` — skips assets, API calls, and other sub-requests. Reduces event volume significantly. Set to `true` if your site generates more requests than your CloudBotWatch plan allows, or if you want to reduce noise from static assets. |
+| `LOG_SAMPLE_RATE` | `1` | Fraction of requests to log (`0.0`–`1.0`). Set to `0.1` to log 10% of traffic. Useful for very high-traffic sites managing ingestion volume. |
 
 ---
 
@@ -165,9 +144,9 @@ The signature is computed over `timestamp=<X-Timestamp>&body=<raw JSON body>` us
 
 | Mode | How to configure | Use case |
 |---|---|---|
-| HTML-only (default) | `LOG_HTML_ONLY=true` | Best bot detection signal — page loads only, no assets |
-| Full logging | `LOG_HTML_ONLY=false` | Complete request picture for active incident investigation |
-| Sampled | `LOG_SAMPLE_RATE=0.1` | 10% sample for very high-traffic sites managing ingestion cost |
+| Full logging (default) | `LOG_HTML_ONLY=false` | Complete request picture — all request types logged |
+| HTML-only | `LOG_HTML_ONLY=true` | Page loads only, no assets or API calls — reduces event volume if approaching plan limits |
+| Sampled | `LOG_SAMPLE_RATE=0.1` | 10% sample for very high-traffic sites managing ingestion volume |
 
 ---
 
