@@ -12,7 +12,7 @@ function maskIp(ip, asnClass) {
   if (ip && ip.includes(':')) {
     // IPv6: keep first 4 groups
     const parts = ip.split(':');
-    return parts.slice(0, 4).join(':') + '::/64';
+    return parts.slice(0, 4).join(':').replace(/:+$/, '') + '::/64';
   }
   const parts = ip ? ip.split('.') : [];
   if (parts.length === 4) return parts.slice(0, 3).join('.') + '.0/24';
