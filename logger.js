@@ -1,18 +1,32 @@
-// ASN organization prefixes that indicate datacenter/hosting/CDN infrastructure
-const DATACENTER_PATTERNS = /\b(amazon|aws|google|microsoft|azure|cloudflare|digitalocean|linode|vultr|hetzner|ovh|fastly|akamai|limelight|stackpath|zscaler|oracle cloud|rackspace|ibm cloud|alibaba|tencent|huawei|softlayer|cogent|lumen|centurylink|hurricane electric|he\.net|choopa|constant contact|quadranet|tzulo|psychz|path\.net|nexeon|packet|equinix|databank|cyrusone|coresite|switch|vaultworks|greencloudvps|buyvm|frantech|ponynet|serverius|datacamp|m247|reliablesite|sharktech|colo4|colohouse|cologix|flexential|volico|latisys|peak10|tierpoint|sungard|evocative|xo communications|windstream|zayo|inap|centrilogic|webair|datapipe|singlehop|superb|micfo|temok|hostwinds|terrahost|online\.net|scaleway|exoscale|upcloud|brightbox|catalyst cloud|fuga cloud|citynetwork|glesys|ipv4net|ntschina|kddi|ntt|softbank|docomo|att|verizon|comcast|charter|cox|centurylink|frontier|windstream|consolidated|mediacom|suddenlink|sparklight|buckeye|cincinnati bell|hawaiian telcom|cincinnati)\b/i;
+// ASN organization prefixes that indicate datacenter/hosting/CDN infrastructure.
+// A match here means the full IP is stored, so the list must bias toward false
+// negatives: no consumer/mobile ISPs, no bare words likely to appear in
+// residential org names. When in doubt, leave it out — a missed datacenter
+// gets over-masked; a wrong match leaks a residential IP.
+const DATACENTER_PATTERNS = /\b(amazon|aws|google|microsoft|azure|cloudflare|digitalocean|linode|vultr|hetzner|ovh|fastly|akamai|limelight|stackpath|zscaler|oracle cloud|rackspace|ibm cloud|alibaba|tencent|huawei|softlayer|cogent|hurricane electric|he\.net|choopa|constant contact|quadranet|tzulo|psychz|path\.net|nexeon|equinix|databank|cyrusone|coresite|vaultworks|greencloudvps|buyvm|frantech|ponynet|serverius|datacamp|m247|reliablesite|sharktech|colo4|colohouse|cologix|flexential|volico|latisys|peak10|tierpoint|sungard|evocative|xo communications|zayo|inap|centrilogic|webair|datapipe|singlehop|micfo|temok|hostwinds|terrahost|online\.net|scaleway|exoscale|upcloud|brightbox|catalyst cloud|fuga cloud|citynetwork|glesys|ipv4net|ntschina)\b/i;
 
 function classifyAsn(org) {
   if (!org) return 'residential';
   return DATACENTER_PATTERNS.test(org) ? 'datacenter' : 'residential';
 }
 
+function expandIpv6Groups(ip) {
+  // Expand "::" compression to the full 8 groups; without this, an address
+  // like 2001:db8::1 splits into 4 parts and truncation keeps the host bits.
+  const idx = ip.indexOf('::');
+  const head = idx === -1 ? ip : ip.slice(0, idx);
+  const tail = idx === -1 ? '' : ip.slice(idx + 2);
+  const headParts = head ? head.split(':') : [];
+  const tailParts = tail ? tail.split(':') : [];
+  const missing = Math.max(8 - headParts.length - tailParts.length, 0);
+  return headParts.concat(Array(missing).fill('0'), tailParts);
+}
+
 function maskIp(ip, asnClass) {
   if (asnClass === 'datacenter') return ip;
-  // Mask to /24 for residential — drop last octet (IPv4) or last 80 bits (IPv6 simplification)
+  // Mask to /24 (IPv4) or /64 (IPv6) for residential
   if (ip && ip.includes(':')) {
-    // IPv6: keep first 4 groups
-    const parts = ip.split(':');
-    return parts.slice(0, 4).join(':').replace(/:+$/, '') + '::/64';
+    return expandIpv6Groups(ip).slice(0, 4).join(':') + '::/64';
   }
   const parts = ip ? ip.split('.') : [];
   if (parts.length === 4) return parts.slice(0, 3).join('.') + '.0/24';
@@ -62,7 +76,7 @@ function buildPayload(request, cf, response) {
   };
 }
 
-function shouldLog(request, env, asnClass) {
+function shouldLog(request, env) {
   const htmlOnly = (env.LOG_HTML_ONLY || 'false') === 'true';
   const sampleRate = parseFloat(env.LOG_SAMPLE_RATE || '1');
 
@@ -79,11 +93,13 @@ function shouldLog(request, env, asnClass) {
 
 export default {
   async fetch(request, env, ctx) {
-    const cf = request.cf || {};
-    const asnOrg = cf.asOrganization || null;
-    const asnClass = classifyAsn(asnOrg);
+    // If the Worker itself throws or exceeds CPU limits, let the request
+    // pass through to the origin instead of failing the visitor's request.
+    ctx.passThroughOnException();
 
-    if (!shouldLog(request, env, asnClass)) {
+    const cf = request.cf || {};
+
+    if (!shouldLog(request, env)) {
       return fetch(request);
     }
 

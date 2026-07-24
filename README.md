@@ -59,6 +59,10 @@ routes = [
 
 Every event includes the full `hostname` (`www.example.com`, `blog.example.com`, etc.), so you can filter by subdomain in the CloudBotWatch dashboard without needing separate Workers or separate site registrations.
 
+> **On the free Workers plan**, a broad wildcard route can burn through the daily request quota on static assets — see [Cloudflare plan limits](#cloudflare-plan-limits--two-settings-to-check) for how to narrow the route instead.
+
+> **Avoid registering a subdomain as a separate CloudBotWatch site.** Because events are attributed to the most specific registered hostname, adding `blog.example.com` as its own site silently splits its events out of `example.com` — and can weaken bot detection for visitors who navigate between the two, since sessions are analysed per site. Use the dashboard's subdomain filter instead; register a subdomain separately only when it is a genuinely independent property.
+
 ### Verifying the route is active
 
 After adding a route, every page request to your domain will trigger the Worker. Confirm in the Cloudflare dashboard under **Workers & Pages → your worker → Metrics** — you should see invocations appear within minutes of normal traffic.
@@ -87,7 +91,7 @@ All settings are Cloudflare Worker environment variables. The `[vars]` block in 
 | `hostname` | Site hostname |
 | `path` | Full URL path — query string excluded |
 | `ray_suffix` | Last 4 characters of `CF-Ray` header only |
-| `ip_range` | `/24` for residential ASNs; full IP for datacenter ASNs |
+| `ip_range` | `/24` (IPv4) or `/64` (IPv6) for residential ASNs; full IP for datacenter ASNs |
 | `country` | Cloudflare country code |
 | `asn` | Autonomous System Number |
 | `asn_organization` | `request.cf.asOrganization` — human-readable ASN name |
@@ -113,7 +117,7 @@ All settings are Cloudflare Worker environment variables. The `[vars]` block in 
 The Worker classifies the request's ASN organisation name against a built-in datacenter/backbone regex before sending:
 
 - **Datacenter / hosting / backbone ASN** — full IP retained (infrastructure IPs are not personal data)
-- **Residential / mobile ISP** — IP masked to `/24` before the payload leaves the Worker
+- **Residential / mobile ISP** — IP masked to `/24` (IPv4) or `/64` (IPv6) before the payload leaves the Worker
 
 This masking happens at the edge, before transmission. Your backend never receives an unmasked residential IP.
 
@@ -139,6 +143,23 @@ The signature is computed over `timestamp=<X-Timestamp>&body=<raw JSON body>` us
 | Full logging (default) | `LOG_HTML_ONLY=false` | Complete request picture — all request types logged |
 | HTML-only | `LOG_HTML_ONLY=true` | Page loads only, no assets or API calls — reduces event volume if approaching plan limits |
 | Sampled | `LOG_SAMPLE_RATE=0.1` | 10% sample for very high-traffic sites managing ingestion volume |
+
+Because of these modes, event counts in CloudBotWatch can legitimately differ from Cloudflare Analytics — HTML-only and sampling both log a subset of requests by design.
+
+---
+
+## Cloudflare plan limits — two settings to check
+
+**Set the Worker to fail open.** In the Worker's **Settings**, the request-limit failure mode defaults to *"Fail closed (block)"* — if the Worker ever hits an error or a plan limit, that default **takes your entire site down**. Switch it to **"Fail open (proceed)"** so visitors are always served even if logging stops. This is the single most important setting for running this Worker safely.
+
+**Mind the free Workers quota.** Cloudflare's free plan allows **100,000 Worker requests per day across all Workers on your account**, and this logger runs on every request routed through it — asset-heavy pages can consume the quota quickly. The **$5/month Workers Paid plan** raises the limit far beyond that; enable it before relying on the logger for any site with real traffic.
+
+**Note that `LOG_HTML_ONLY` and `LOG_SAMPLE_RATE` do not reduce quota usage.** They reduce how many events are *sent*, but the Worker has already been invoked by the time they apply — and invocations are what count against the 100k/day limit. On the free plan, the only way to reduce quota consumption is to narrow the **route pattern** so fewer requests reach the Worker in the first place:
+
+- Route specific paths instead of everything — e.g. `example.com/` and `example.com/blog/*` rather than `*example.com/*`. Route patterns cannot exclude paths, so match only what you want logged.
+- Serve static assets from a subdomain (e.g. `static.example.com`) that the route doesn't cover.
+
+On an asset-heavy page, a `/*` route can spend 90% of invocations on images, stylesheets, and fonts that `LOG_HTML_ONLY=true` then discards. Narrowing the route keeps those requests off your quota entirely; the env vars remain useful on the Paid plan for controlling *event* volume against your CloudBotWatch plan limits.
 
 ---
 
