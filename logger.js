@@ -1,3 +1,8 @@
+/*!
+ * CloudBotWatch Logger — https://github.com/CloudBotWatch/logger
+ * Copyright (c) 2026 CloudBotWatch. Released under the MIT License.
+ */
+
 // ASN organization prefixes that indicate datacenter/hosting/CDN infrastructure.
 // A match here means the full IP is stored, so the list must bias toward false
 // negatives: no consumer/mobile ISPs, no bare words likely to appear in
@@ -74,21 +79,6 @@ function buildPayload(request, cf, response) {
   };
 }
 
-function shouldLog(request, env) {
-  const htmlOnly = (env.LOG_HTML_ONLY || 'false') === 'true';
-  const sampleRate = parseFloat(env.LOG_SAMPLE_RATE || '1');
-
-  if (htmlOnly) {
-    const accept = request.headers.get('accept') || '';
-    // Skip requests that don't accept HTML (assets, XHR, etc.)
-    if (!accept.includes('text/html')) return false;
-  }
-
-  if (sampleRate < 1 && Math.random() > sampleRate) return false;
-
-  return true;
-}
-
 export default {
   async fetch(request, env, ctx) {
     // If the Worker itself throws or exceeds CPU limits, let the request
@@ -96,10 +86,6 @@ export default {
     ctx.passThroughOnException();
 
     const cf = request.cf || {};
-
-    if (!shouldLog(request, env)) {
-      return fetch(request);
-    }
 
     const response = await fetch(request);
 
