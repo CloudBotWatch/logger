@@ -14,30 +14,14 @@ Every outbound request is signed with HMAC-SHA256 (`X-Timestamp` + `X-Signature`
 
 ## Quick start
 
-No GitHub account or local tooling required — deploy directly from the Cloudflare dashboard.
+No local tooling required — deploy directly from the Cloudflare dashboard.
 
-### Option A — Cloudflare dashboard (recommended)
 
 1. Copy the contents of [`logger.js`](https://raw.githubusercontent.com/CloudBotWatch/logger/main/logger.js)
 2. Go to [dash.cloudflare.com](https://dash.cloudflare.com) → **Workers & Pages → Create**
 3. Choose **Create Worker**, paste the code, and click **Deploy**
 4. Go to **Settings → Variables** and add `LOG_ENDPOINT` and `LOG_SECRET` as encrypted secrets
-5. Go to **Settings → Triggers → Routes**, click **Add route**, and enter `*example.com/*`
-
-### Option B — Wrangler CLI
-
-```bash
-git clone https://github.com/CloudBotWatch/logger.git
-cd logger && npm install
-npx wrangler deploy
-```
-
-Then set the required secrets (the Worker will not send any data until both are set):
-
-```bash
-npx wrangler secret put LOG_ENDPOINT
-npx wrangler secret put LOG_SECRET
-```
+5. Open your domain → **Workers Routes → Add route**. In one dialog: enter the **Route** `*example.com/*`, select this Worker, and — on the free plan — set **Failure mode** to *"Fail open (proceed)"*. Click **Save**. See [Cloudflare plan limits](#cloudflare-plan-limits--two-settings-to-check).
 
 ---
 
@@ -49,13 +33,13 @@ The Worker is a transparent proxy — it passes every request to your origin unc
 
 ### Subdomain handling
 
-Register your site using the zone apex (`example.com`) and use a wildcard route to cover all subdomains in one deployment:
+Register your site using your root domain (`example.com`) and use a single wildcard route to cover every subdomain:
 
-```toml
-routes = [
-  { pattern = "*example.com/*", zone_name = "example.com" }
-]
 ```
+*example.com/*
+```
+
+The leading `*` is what makes this work: `*example.com/*` matches the root domain **and** every subdomain — `example.com`, `www.example.com`, `blog.example.com`. Without it, `example.com/*` matches the root domain only and misses `www.` traffic entirely, which is a common cause of "the Worker is deployed but nothing logs".
 
 Every event includes the full `hostname` (`www.example.com`, `blog.example.com`, etc.), so you can filter by subdomain in the CloudBotWatch dashboard without needing separate Workers or separate site registrations.
 
@@ -73,14 +57,14 @@ If you are using CloudBotWatch, the dashboard shows a verify-connection indicato
 
 ## Configuration
 
-All settings are Cloudflare Worker environment variables. The `[vars]` block in `wrangler.toml` sets the defaults; override them in the Cloudflare dashboard under **Workers & Pages → your worker → Settings → Variables**.
+Both settings are Cloudflare Worker environment variables, set as encrypted **Secrets** under **Workers & Pages → your worker → Settings → Variables and Secrets**.
+
+The Worker logs every request its route matches; there are no sampling or filtering options. Partial logging degrades session-level analysis, so to reduce volume narrow the **route pattern** instead — see [Cloudflare plan limits](#cloudflare-plan-limits--two-settings-to-check). (`LOG_HTML_ONLY` and `LOG_SAMPLE_RATE` existed in earlier versions and are no longer read.)
 
 | Variable | Default | Description |
 |---|---|---|
 | `LOG_ENDPOINT` | *(required)* | URL to POST telemetry to — CloudBotWatch ingest URL, ELK, Datadog, or any HTTP endpoint |
 | `LOG_SECRET` | *(required)* | HMAC-SHA256 signing secret shared with your backend. Minimum 32 characters. |
-| `LOG_HTML_ONLY` | `false` | When `true`, only log requests where the `Accept` header includes `text/html` — skips assets, API calls, and other sub-requests. Reduces event volume significantly. Set to `true` if your site generates more requests than your CloudBotWatch plan allows, or if you want to reduce noise from static assets. |
-| `LOG_SAMPLE_RATE` | `1` | Fraction of requests to log (`0.0`–`1.0`). Set to `0.1` to log 10% of traffic. Useful for very high-traffic sites managing ingestion volume. |
 
 ---
 
@@ -136,30 +120,20 @@ The signature is computed over `timestamp=<X-Timestamp>&body=<raw JSON body>` us
 
 ---
 
-## Operational modes
-
-| Mode | How to configure | Use case |
-|---|---|---|
-| Full logging (default) | `LOG_HTML_ONLY=false` | Complete request picture — all request types logged |
-| HTML-only | `LOG_HTML_ONLY=true` | Page loads only, no assets or API calls — reduces event volume if approaching plan limits |
-| Sampled | `LOG_SAMPLE_RATE=0.1` | 10% sample for very high-traffic sites managing ingestion volume |
-
-Because of these modes, event counts in CloudBotWatch can legitimately differ from Cloudflare Analytics — HTML-only and sampling both log a subset of requests by design.
-
----
-
 ## Cloudflare plan limits — two settings to check
 
-**Set the Worker to fail open.** In the Worker's **Settings**, the request-limit failure mode defaults to *"Fail closed (block)"* — if the Worker ever hits an error or a plan limit, that default **takes your entire site down**. Switch it to **"Fail open (proceed)"** so visitors are always served even if logging stops. This is the single most important setting for running this Worker safely.
+**Set the route to fail open.** Failure mode is a property of the **route**, not the Worker — it lives in Cloudflare's **Add route / Edit route** dialog, as a pair of radio cards below the route pattern. It defaults to *"Fail closed (block)"*, which returns an error page to visitors once the Worker exceeds its limits. Select **"Fail open (proceed)"** so overflow requests bypass the Worker to your origin instead. This is the single most important setting for running this Worker safely.
 
-**Mind the free Workers quota.** Cloudflare's free plan allows **100,000 Worker requests per day across all Workers on your account**, and this logger runs on every request routed through it — asset-heavy pages can consume the quota quickly. The **$5/month Workers Paid plan** raises the limit far beyond that; enable it before relying on the logger for any site with real traffic.
+> **Free plan only.** The Failure mode section appears only on the Workers Free plan — the 100k/day cap it guards against doesn't apply on paid. If you don't see it in the route dialog, you're on a paid plan and there's nothing to set.
 
-**Note that `LOG_HTML_ONLY` and `LOG_SAMPLE_RATE` do not reduce quota usage.** They reduce how many events are *sent*, but the Worker has already been invoked by the time they apply — and invocations are what count against the 100k/day limit. On the free plan, the only way to reduce quota consumption is to narrow the **route pattern** so fewer requests reach the Worker in the first place:
+**Mind the free Workers quota.** Cloudflare's free plan allows **100,000 Worker requests per day across all Workers on your account**, and this logger runs on every request routed through it — asset-heavy pages can consume the quota quickly. Cloudflare's Workers Paid plan raises the limit far beyond that; enable it before relying on the logger for any site with real traffic.
 
-- Route specific paths instead of everything — e.g. `example.com/` and `example.com/blog/*` rather than `*example.com/*`. Route patterns cannot exclude paths, so match only what you want logged.
+**The route pattern is the only lever on quota.** Once a request matches the route the invocation is spent, whether the Worker logs it or not — so the only way to reduce quota consumption is to narrow the **route pattern** so fewer requests reach the Worker at all:
+
+- Route specific paths instead of everything — e.g. `*example.com/blog/*` rather than `*example.com/*`. Route patterns cannot exclude paths, so match only what you want logged; scrapers go after content, so content-only routing usually costs little, but you won't see bot traffic on the paths you leave out.
 - Serve static assets from a subdomain (e.g. `static.example.com`) that the route doesn't cover.
 
-On an asset-heavy page, a `/*` route can spend 90% of invocations on images, stylesheets, and fonts that `LOG_HTML_ONLY=true` then discards. Narrowing the route keeps those requests off your quota entirely; the env vars remain useful on the Paid plan for controlling *event* volume against your CloudBotWatch plan limits.
+On an asset-heavy page a `/*` route can spend 90% of its invocations on images, stylesheets, and fonts. Narrowing the route keeps those requests off your quota entirely, and you keep full detail on the paths you do monitor.
 
 ---
 
@@ -182,3 +156,11 @@ After signing up, set `LOG_ENDPOINT` to your site's CloudBotWatch ingest URL and
 CloudBotWatch Logger uses only metadata already available to Cloudflare at the edge. It does not use tracking cookies, JavaScript snippets, pixels, or advertising identifiers. All IP masking happens inside the Worker before any data leaves your zone.
 
 See [cloudbotwatch.com/privacy](https://cloudbotwatch.com/privacy) for the full data processing and retention policy.
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE). Copyright (c) 2026 CloudBotWatch.
+
+You are free to use, modify, and redistribute this Worker, including commercially and with a backend of your own. Keep the copyright notice with the code.

@@ -1,24 +1,26 @@
 {
-  "name": "logger",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
+  "name": "cloudbotwatch-logger",
+  "version": "2026.7.25",
+  "private": true,
+  "description": "Cloudflare Worker that collects privacy-minimised edge telemetry and forwards it, HMAC-signed, to any HTTP endpoint.",
+  "main": "logger.js",
+  "type": "module",
+  "keywords": [
+    "cloudflare",
+    "cloudflare-workers",
+    "bot-detection",
+    "telemetry",
+    "privacy",
+    "analytics"
+  ],
+  "author": "CloudBotWatch",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/CloudBotWatch/logger.git"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs",
   "bugs": {
     "url": "https://github.com/CloudBotWatch/logger/issues"
   },
-  "homepage": "https://github.com/CloudBotWatch/logger#readme",
-  "devDependencies": {
-    "wrangler": "^4.95.0"
-  }
+  "homepage": "https://github.com/CloudBotWatch/logger#readme"
 }
