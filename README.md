@@ -74,8 +74,8 @@ The Worker logs every request its route matches; there are no sampling or filter
 |---|---|
 | `hostname` | Site hostname |
 | `path` | Full URL path — query string excluded |
-| `ray_suffix` | Last 4 characters of `CF-Ray` header only |
-| `ip_range` | `/24` (IPv4) or `/64` (IPv6) for residential ASNs; full IP for datacenter ASNs |
+| `client_hash` | HMAC-SHA256 of the full IP + User-Agent, keyed with `LOG_SECRET`. A stable per-client identifier — the raw IP itself is never sent. Always present. Your backend is expected to salt this per day before storing it (see below) |
+| `ip_range` | `/24` (IPv4) or `/64` (IPv6) — **all** traffic, no exceptions |
 | `country` | Cloudflare country code |
 | `asn` | Autonomous System Number |
 | `asn_organization` | `request.cf.asOrganization` — human-readable ASN name |
@@ -87,8 +87,8 @@ The Worker logs every request its route matches; there are no sampling or filter
 
 ### Deliberately not collected
 
-- Full IP address
-- Full CF-Ray ID (last 4 characters only)
+- Full IP address — masked before transmission, and never sent even inside `client_hash` (which is a one-way HMAC)
+- CF-Ray ID in any form
 - Query strings
 - Cookies or `Authorization` headers
 - Request or response bodies
@@ -98,12 +98,27 @@ The Worker logs every request its route matches; there are no sampling or filter
 
 ## IP masking
 
-The Worker classifies the request's ASN organisation name against a built-in datacenter/backbone regex before sending:
+Every IP is masked to `/24` (IPv4) or `/64` (IPv6) before the payload leaves the Worker. There are no exceptions and nothing to configure.
 
-- **Datacenter / hosting / backbone ASN** — full IP retained (infrastructure IPs are not personal data)
-- **Residential / mobile ISP** — IP masked to `/24` (IPv4) or `/64` (IPv6) before the payload leaves the Worker
+A request with no client IP, or one in a format the Worker does not recognise, is **not logged at all** — the event is dropped at the edge rather than sent with fields missing. Such a record would carry neither a maskable range nor a session identity, and a record with no identity is worse than no record. The visitor's request itself is unaffected, as always.
 
-This masking happens at the edge, before transmission. Your backend never receives an unmasked residential IP.
+Masking happens at the edge, before transmission, so your backend never receives an unmasked IP of any kind.
+
+Earlier versions kept full IPs for addresses an inline regex judged to be datacenter ASNs. That was removed: masking at the edge is irreversible, so it must not depend on a classifier that can be wrong in either direction. Classify ASNs in your backend instead, where a correction re-derives every stored row.
+
+Session identity does not suffer from this. `client_hash` is computed from the **full** IP inside the Worker and only the masked range is transmitted, so grouping stays precise without the address ever leaving Cloudflare.
+
+### What your backend should do with `client_hash`
+
+`client_hash` is stable for a given IP + User-Agent, so **do not store it as received**. Hash it again with a per-day secret and store only that:
+
+```
+session_id = SHA256(client_hash + daily_salt)
+```
+
+Discard each day's salt when the day ends. Two properties follow: the stored identifier cannot be reversed to an IP even by someone holding `LOG_SECRET`, and it cannot link a visitor across days.
+
+Rotation is the backend's job rather than the Worker's on purpose — the backend knows which timezone each site reports days in, and rotating on the Worker's clock would split a visitor's local day in two for any site not on UTC.
 
 ---
 
@@ -141,7 +156,7 @@ On an asset-heavy page a `/*` route can spend 90% of its invocations on images, 
 
 [CloudBotWatch.com](https://cloudbotwatch.com) is the hosted backend built for this Worker. It provides:
 
-- Bot scoring per session group using Ray suffix, asset loading, timing, and ASN signals
+- Bot scoring per session group using asset loading, timing, cache behaviour, and ASN signals
 - ASN intelligence with per-ASN risk profiles and classification
 - WAF recommendation module — copy-paste Cloudflare WAF expressions ready to deploy
 - Cross-site threat feed (ASNs observed as suspicious across multiple customer sites)
